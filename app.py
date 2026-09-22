@@ -4,14 +4,20 @@ Serves the roster, randomizes groups, and (in production) serves the
 built frontend from frontend/dist.
 """
 
+import csv
 import json
 import os
 import random
+from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request, send_from_directory
 
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "roster.json")
+SURVEY_FILE = os.path.join(os.path.dirname(__file__), "data", "survey_responses.csv")
+
+SURVEY_COLUMNS = ["name", "school_year", "working_style"]
+SCHOOL_YEARS = ["First-year", "Sophomore", "Junior", "Senior", "Other"]
 
 app = Flask(__name__, static_folder=None)
 
@@ -44,6 +50,48 @@ def randomize_groups():
             groups[i % len(groups)].append(student)
 
     return jsonify({"groups": [{"number": i + 1, "members": g} for i, g in enumerate(groups)]})
+
+
+@app.post("/api/survey")
+def submit_survey():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name") or "").strip()
+    school_year = str(body.get("school_year") or "").strip()
+    working_style = str(body.get("working_style") or "").strip()
+
+    missing = []
+    if not name:
+        missing.append("name")
+    if not school_year:
+        missing.append("school_year")
+    if not working_style:
+        missing.append("working_style")
+    if missing:
+        return jsonify({"error": "Missing required fields", "missing": missing}), 400
+
+    roster_names = {student["name"] for student in load_roster()["students"]}
+    if name not in roster_names:
+        return jsonify({"error": "Name must be chosen from the roster", "missing": ["name"]}), 400
+    if school_year not in SCHOOL_YEARS:
+        return jsonify({"error": "Invalid school year", "missing": ["school_year"]}), 400
+
+    os.makedirs(os.path.dirname(SURVEY_FILE), exist_ok=True)
+    fieldnames = SURVEY_COLUMNS + ["submitted_at"]
+    write_header = not os.path.isfile(SURVEY_FILE) or os.path.getsize(SURVEY_FILE) == 0
+    with open(SURVEY_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "name": name,
+                "school_year": school_year,
+                "working_style": working_style,
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    return jsonify({"ok": True})
 
 
 # ---- Serve the built frontend (production) ----------------------------------

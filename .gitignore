@@ -11,6 +11,9 @@ frontend/dist/
 .env
 *.env
 
+# Local survey responses
+data/survey_responses.csv
+
 # Editor / OS noise
 .DS_Store
 .idea/
